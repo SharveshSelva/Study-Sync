@@ -32,6 +32,18 @@ The app runs at http://localhost:3000. Both pages have a "use sample" button so 
 | `npm run build` | Production build |
 | `npm start` | Serve the production build |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Unit tests (vitest) |
+| `npm run test:watch` | Tests in watch mode |
+
+### Tests
+
+49 unit tests over the logic that is easy to break silently and awkward to eyeball:
+
+- **`lib/schedule.test.ts`** — weekday patterns, exam-day exclusion, the 60-session cap, month/year/leap-day rollover, duration formatting. A plan that is off by a day is worse than no plan, so this is the most load-bearing suite.
+- **`lib/markdown.test.ts`** — checkbox rendering, resources and due hints omitted when null, milestones dated from their session number, singular/plural, and that `"Unassigned"` never renders as a suggested owner.
+- **`lib/guard.test.ts`** — password accept/reject with the right status codes, per-IP rate limiting, `x-forwarded-for` chain parsing, and the disable switch.
+
+CI runs typecheck, tests and a production build on every push and pull request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). No API key is needed: keys are only read at request time, so the build is hermetic.
 
 ---
 
