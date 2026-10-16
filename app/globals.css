@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/* Tokens are declared as plain custom properties so they can flip with the
+   colour scheme, then surfaced to Tailwind with `@theme inline`. */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-positive: var(--positive);
+  --color-caution: var(--caution);
+  --color-critical: var(--critical);
+  --font-sans: var(--font-stack);
+}
+
+:root {
+  --font-stack: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+
+  --canvas: #0a0b10;
+  --surface: #12141c;
+  --raised: #1a1d27;
+  --line: #262a37;
+  --ink: #e9ebf2;
+  --muted: #9aa2b6;
+  --faint: #6b7287;
+  --accent: #7c6cff;
+  --accent-ink: #ffffff;
+  --accent-soft: #1e1b3a;
+  --positive: #34d399;
+  --caution: #fbbf24;
+  --critical: #f87171;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --canvas: #f6f7fb;
+    --surface: #ffffff;
+    --raised: #f1f3f9;
+    --line: #e2e6f0;
+    --ink: #151822;
+    --muted: #5c6478;
+    --faint: #848ca1;
+    --accent: #5b4bd6;
+    --accent-ink: #ffffff;
+    --accent-soft: #eeebff;
+    --positive: #089070;
+    --caution: #b45309;
+    --critical: #dc2626;
+  }
+}
+
+html {
+  color-scheme: dark light;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-stack);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A soft wash behind the page so large flat areas do not feel dead. */
+.aurora::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(60rem 30rem at 15% -10%, color-mix(in oklab, var(--accent) 22%, transparent), transparent 70%),
+    radial-gradient(50rem 26rem at 95% 0%, color-mix(in oklab, var(--positive) 12%, transparent), transparent 70%);
+}
+
+/* Keyboard focus that is visible on every surface we use. */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; color: #000; }
+}

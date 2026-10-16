@@ -1,0 +1,10 @@
+# Secrets live in Vercel's Environment Variables, never in the upload.
+.env
+.env.local
+.env*.local
+
+# Local-only tooling and build output
+.claude
+node_modules
+.next
+*.tsbuildinfo

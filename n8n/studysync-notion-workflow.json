@@ -1,0 +1,431 @@
+{
+  "name": "StudySync to Notion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "studysync",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "StudySync webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        300
+      ],
+      "webhookId": "studysync",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "x-studysync-secret"
+        }
+      },
+      "notes": "Header Auth credential must be named x-studysync-secret to match the header the app sends. Its value goes in the app as N8N_WEBHOOK_SECRET."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "is-plan",
+                    "leftValue": "={{ $json.body.kind }}",
+                    "rightValue": "plan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "plan"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "is-digest",
+                    "leftValue": "={{ $json.body.kind }}",
+                    "rightValue": "digest",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "digest"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Plan or digest?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -200,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Converts the Markdown the app sends into Notion blocks.\n// Returns one item per 100-block batch, because Notion accepts at most\n// 100 children per request and a real plan exceeds that.\nconst markdown = $('StudySync webhook').first().json.body.payload.markdown ?? '';\n\nfunction markdownToBatches(markdown) {\n  const LIMIT = 1900; // Notion caps a single rich_text value at 2000 chars.\n\n  // Parses **bold** and `code` into Notion rich_text runs so the page does\n  // not render literal asterisks and backticks.\n  function richText(text) {\n    if (!text) return [];\n    const runs = [];\n    const pattern = /(\\*\\*([^*]+)\\*\\*|`([^`]+)`)/g;\n    let last = 0;\n    let m;\n    while ((m = pattern.exec(text)) !== null) {\n      if (m.index > last) {\n        runs.push({ type: \"text\", text: { content: text.slice(last, m.index) } });\n      }\n      if (m[2] !== undefined) {\n        runs.push({ type: \"text\", text: { content: m[2] }, annotations: { bold: true } });\n      } else {\n        runs.push({ type: \"text\", text: { content: m[3] }, annotations: { code: true } });\n      }\n      last = m.index + m[0].length;\n    }\n    if (last < text.length) {\n      runs.push({ type: \"text\", text: { content: text.slice(last) } });\n    }\n    // Split any run that is still over the per-value limit.\n    const safe = [];\n    for (const run of runs) {\n      const content = run.text.content;\n      if (content.length <= LIMIT) {\n        safe.push(run);\n        continue;\n      }\n      for (let i = 0; i < content.length; i += LIMIT) {\n        safe.push({ ...run, text: { content: content.slice(i, i + LIMIT) } });\n      }\n    }\n    return safe.slice(0, 100); // Notion caps rich_text runs per block at 100.\n  }\n\n  function toBlock(line) {\n    const trimmed = line.trimEnd();\n    if (!trimmed.trim()) return null; // Skip blanks; they only burn block budget.\n\n    let m;\n    if ((m = /^###\\s+(.*)$/.exec(trimmed))) {\n      return { object: \"block\", type: \"heading_3\", heading_3: { rich_text: richText(m[1]) } };\n    }\n    if ((m = /^##\\s+(.*)$/.exec(trimmed))) {\n      return { object: \"block\", type: \"heading_2\", heading_2: { rich_text: richText(m[1]) } };\n    }\n    if ((m = /^#\\s+(.*)$/.exec(trimmed))) {\n      return { object: \"block\", type: \"heading_1\", heading_1: { rich_text: richText(m[1]) } };\n    }\n    if ((m = /^-\\s+\\[\\s*\\]\\s+(.*)$/.exec(trimmed))) {\n      return {\n        object: \"block\",\n        type: \"to_do\",\n        to_do: { rich_text: richText(m[1]), checked: false },\n      };\n    }\n    if ((m = /^[-*]\\s+(.*)$/.exec(trimmed))) {\n      return {\n        object: \"block\",\n        type: \"bulleted_list_item\",\n        bulleted_list_item: { rich_text: richText(m[1]) },\n      };\n    }\n    if ((m = /^>\\s+(.*)$/.exec(trimmed))) {\n      return { object: \"block\", type: \"quote\", quote: { rich_text: richText(m[1]) } };\n    }\n    return { object: \"block\", type: \"paragraph\", paragraph: { rich_text: richText(trimmed) } };\n  }\n\n  const blocks = markdown.split(\"\\n\").map(toBlock).filter(Boolean);\n\n  // Notion accepts at most 100 children per request, so emit one item per\n  // batch. The HTTP node downstream runs once per item, appending in order.\n  const batches = [];\n  for (let i = 0; i < blocks.length; i += 100) {\n    batches.push({ json: { blocks: blocks.slice(i, i + 100) } });\n  }\n  return batches.length > 0 ? batches : [{ json: { blocks: [] } }];\n}\n\nreturn markdownToBatches(markdown);"
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Markdown to Notion blocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": "46c5777eb1344d3f94780f7aa329398f",
+        "title": "={{ $json.body.payload.subject }} study plan",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Type|select",
+              "selectValue": "Study plan"
+            },
+            {
+              "key": "Exam date|date",
+              "date": "={{ $json.body.payload.meta.examDate }}",
+              "includeTime": false
+            },
+            {
+              "key": "Sessions|number",
+              "numberValue": "={{ $json.body.payload.meta.totalSessions }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Create plan page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        20,
+        120
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Notion account"
+        }
+      },
+      "notes": "Your Plans database needs Type (select), Exam date (date) and Sessions (number) properties, and the integration must be shared with it."
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/blocks/{{ $('Create plan page').first().json.id }}/children",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ children: $json.blocks }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Append plan body",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        120
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Notion account"
+        }
+      },
+      "notes": "Batching is set to one item per batch on purpose: a plan over 100 blocks is split across several requests, and without serialising them Notion receives the batches out of order, so the page starts mid-plan."
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": "a86336f60d1e4b32b33d7644f8252571",
+        "title": "={{ $json.body.payload.sessionTitle }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Type|select",
+              "selectValue": "Session notes"
+            },
+            {
+              "key": "Summary|rich_text",
+              "textContent": "={{ $json.body.payload.summary.slice(0, 1900) }}"
+            },
+            {
+              "key": "Open doubts|number",
+              "numberValue": "={{ $json.body.payload.openDoubts.length }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Create session page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        20,
+        420
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Fan the digest out into one item per action item.\n// Read from the webhook, not $input: this node runs after Create session\n// page, so its input is the Notion page, which has no actionItems.\nconst payload = $('StudySync webhook').first().json.body.payload;\nconst tasks = payload.actionItems || [];\nreturn tasks.map((t) => ({ json: t }));"
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "One item per task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        420
+      ],
+      "notes": "A Split Out node cannot be used here: it only reads fields on its own input, which is the Notion page created upstream."
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": "e1dc9ebb0ff74b72896285bf3889dd65",
+        "title": "={{ $json.task }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Owner|rich_text",
+              "textContent": "={{ $json.member }}"
+            },
+            {
+              "key": "Priority|select",
+              "selectValue": "={{ $json.priority }}"
+            },
+            {
+              "key": "Status|select",
+              "selectValue": "Not started"
+            },
+            {
+              "key": "Session|rich_text",
+              "textContent": "={{ $('Create session page').first().json.name }}"
+            },
+            {
+              "key": "Due hint|rich_text",
+              "textContent": "={{ $json.dueHint ?? '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-00000000000a",
+      "name": "Create task row",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        420
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Notion account"
+        }
+      },
+      "notes": "Owner is a TEXT property on purpose: Notion returns 400 for a select value that is not already an option, and group member names are not known up front. Priority and Status stay selects because their values are fixed."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true } }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-00000000000b",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        700,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "maxItems": 1
+      },
+      "id": "a1000000-0000-4000-8000-00000000000c",
+      "name": "Collapse to one",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        600,
+        280
+      ],
+      "notes": "Respond to Webhook must fire once; both branches can emit many items."
+    }
+  ],
+  "connections": {
+    "StudySync webhook": {
+      "main": [
+        [
+          {
+            "node": "Plan or digest?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan or digest?": {
+      "main": [
+        [
+          {
+            "node": "Create plan page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create session page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create plan page": {
+      "main": [
+        [
+          {
+            "node": "Markdown to Notion blocks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown to Notion blocks": {
+      "main": [
+        [
+          {
+            "node": "Append plan body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append plan body": {
+      "main": [
+        [
+          {
+            "node": "Collapse to one",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create session page": {
+      "main": [
+        [
+          {
+            "node": "One item per task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per task": {
+      "main": [
+        [
+          {
+            "node": "Create task row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create task row": {
+      "main": [
+        [
+          {
+            "node": "Collapse to one",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collapse to one": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

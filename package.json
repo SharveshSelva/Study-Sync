@@ -1,0 +1,30 @@
+{
+  "name": "studysync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI study planner that turns a syllabus into a day-by-day plan and messy group notes into clear tasks.",
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^4.0.98",
+    "@ai-sdk/groq": "^4.0.62",
+    "ai": "^7.0.142",
+    "ai-sdk-ollama": "^4.5.0",
+    "next": "^16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}
